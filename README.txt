@@ -46,3 +46,9 @@ service cloud.firestore {
 
 NOTA: La app usa inicio anónimo para que estudiantes registren asistencia al abrir el QR sin crear cuenta.
 Si activas reglas más estrictas, también habilita Authentication > Sign-in method > Anonymous.
+
+ACTUALIZACIÓN SOLICITADA
+- En Sesiones / QR ahora se captura la hora de inicio de clase.
+- La hora de inicio se usa para determinar Asistencia o Retardo según los minutos de tolerancia.
+- El CSV de asistencia exporta únicamente: fecha, grupo, nombre y hora_de_llegada.
+- En Maestros > Grupos asignados se agregó la opción "Todos los grupos / todos los estudiantes".
