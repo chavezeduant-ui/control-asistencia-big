@@ -2,13 +2,12 @@
 // Mientras esté vacío, la app funciona en modo local/demostración.
 window.FIREBASE_CONFIG = null;
 
-/* Ejemplo:
 window.FIREBASE_CONFIG = {
-  apiKey: "...",
-  authDomain: "...firebaseapp.com",
-  projectId: "...",
-  storageBucket: "...appspot.com",
-  messagingSenderId: "...",
-  appId: "..."
+  apiKey: "AIzaSyAuIl2pDUm90SjGWAhGXS8Z4kpxWBGOzgE",
+  authDomain: "control-asistencia-big.firebaseapp.com",
+  projectId: "control-asistencia-big",
+  storageBucket: "control-asistencia-big.firebasestorage.app",
+  messagingSenderId: "580360757102",
+  appId: "1:580360757102:web:16c65b415f195498bc2b7f",
+  measurementId: "G-BH33BF7TRC"
 };
-*/
