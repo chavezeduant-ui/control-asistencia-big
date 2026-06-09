@@ -2,3 +2,7 @@
 .tableWrap{overflow-x:auto;max-width:100%;}
 .okCell{color:#188038;text-align:center;}
 .naCell{color:#d93025;text-align:center;}
+.report-spacer{ margin-top: 16px; }
+.tableWrap{ overflow:auto; max-width:100%; }
+.okCell{ color:#188038; }
+.naCell{ color:#d93025; }

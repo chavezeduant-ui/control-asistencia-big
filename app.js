@@ -44,7 +44,7 @@ function renderNoProfile(){ appEl.innerHTML=`<section class="card"><h1>Usuario s
 logoutBtn.onclick=()=>auth.signOut();
 
 function nav(){ const isAdmin=currentProfile?.role==='admin'; return `<div class="card"><div class="row"><button data-view="dashboard">Inicio</button><button class="ghost" data-view="sessions">Sesiones / QR</button><button class="ghost" data-view="reports">Reportes</button>${isAdmin?'<button class="ghost" data-view="teachers">Maestros</button><button class="ghost" data-view="students">Alumnos</button><button class="ghost" data-view="settings">Configuración</button>':''}</div></div>`; }
-function renderHome(view='dashboard'){ appEl.innerHTML=nav()+`<div id="view"></div>`; document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>renderHome(b.dataset.view)); if(view==='dashboard') renderDashboard(); if(view==='sessions') renderSessions(); if(view==='reports') renderReports(); if(view==='teachers') renderTeachers(); if(view==='students') renderStudents(); if(view==='settings') renderSettings(); }
+function renderHome(view='dashboard'){ appEl.innerHTML=nav()+`<div id="view"></div>`; document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>renderHome(b.dataset.view)); if(view==='dashboard') renderDashboard(); if(view==='sessions') renderSessions(); if(view==='reports') renderReports(); if(view==='rangeReports') renderRangeReports(); if(view==='teachers') renderTeachers(); if(view==='students') renderStudents(); if(view==='settings') renderSettings(); }
 function viewEl(){ return document.getElementById('view'); }
 async function seedInitialData(){
   const batch=db.batch();
@@ -77,12 +77,25 @@ async function renderReports(){
   <h3>Reporte por día</h3>
   <div class="row"><select id="rgrp"><option value="">Todos</option>${groups.map(g=>`<option>${safe(g.name)}</option>`).join('')}</select><input id="rdate" type="date" value="${today()}"><button id="loadReport">Consultar</button><button id="csv" class="ghost">Exportar CSV</button><button id="pdf" class="ghost">Exportar PDF</button></div><div id="reportOut"></div>
   <hr style="border:none;border-top:1px solid #e3e8ef;margin:24px 0">
-  <h3>Reporte de varios días</h3>
-  <p class="muted">Selecciona un grupo y un rango de fechas. El reporte mostrará a todos los estudiantes del grupo y marcará cada día con <strong>A</strong> si asistió o <strong>NA</strong> si no asistió.</p>
-  <div class="row"><select id="rangeGrp"><option value="">Selecciona grupo...</option>${groups.map(g=>`<option>${safe(g.name)}</option>`).join('')}</select><label style="margin:0">Desde <input id="rangeStart" type="date" value="${today()}"></label><label style="margin:0">Hasta <input id="rangeEnd" type="date" value="${today()}"></label><button id="loadRangeReport">Generar reporte</button><button id="rangeCsv" class="ghost">Exportar CSV</button><button id="rangePdf" class="ghost">Exportar PDF</button></div><div id="rangeReportOut"></div>
+  <h3>Reporte acumulado por varios días</h3>
+  <p class="muted">Para no saturar esta pantalla, el reporte acumulado se genera en una página separada.</p>
+  <button id="openRangeReports">Abrir reporte acumulado</button>
   </section>`;
-  let last=[]; let lastRange=null;
+  let last=[];
   const load=async()=>{ const g=document.getElementById('rgrp').value; const d=document.getElementById('rdate').value; let q=db.collection('attendance').where('date','==',d); const snap=await q.get(); last=snap.docs.map(x=>({docId:x.id,...x.data()})).filter(r=>!g||r.group===g).sort((a,b)=>(a.group||'').localeCompare(b.group||'')||(a.studentName||'').localeCompare(b.studentName||'')); document.getElementById('reportOut').innerHTML=`<table><thead><tr><th>Fecha</th><th>Grupo</th><th>Nombre</th><th>Hora de llegada</th><th>Acción</th></tr></thead><tbody>${last.map(r=>`<tr><td>${safe(r.date)}</td><td>${safe(r.group)}</td><td>${safe(r.studentName)}</td><td>${safe(r.time)}</td><td><button class="danger small delRec" data-id="${safe(r.docId)}">Borrar</button></td></tr>`).join('')}</tbody></table>`; document.querySelectorAll('.delRec').forEach(btn=>btn.onclick=async()=>{ if(confirm('¿Borrar este registro de asistencia?')){ await db.collection('attendance').doc(btn.dataset.id).delete(); await load(); } }); };
+  document.getElementById('loadReport').onclick=load; document.getElementById('csv').onclick=()=>downloadCSV(last); document.getElementById('pdf').onclick=()=>exportPDF(last);
+  document.getElementById('openRangeReports').onclick=()=>renderHome('rangeReports');
+}
+
+async function renderRangeReports(){
+  const groups=await getVisibleGroups();
+  viewEl().innerHTML=`<section class="card"><div class="row"><button id="backReports" class="ghost">← Volver a reportes</button></div><h1>Reporte acumulado por varios días</h1>
+  <p class="muted">Selecciona grupo y rango de fechas. El reporte mostrará a todos los estudiantes del grupo y marcará cada día con <strong>A</strong> si asistió o <strong>NA</strong> si no asistió.</p>
+  <div class="row"><select id="rangeGrp"><option value="">Selecciona grupo...</option>${groups.map(g=>`<option>${safe(g.name)}</option>`).join('')}</select><label style="margin:0">Desde <input id="rangeStart" type="date" value="${today()}"></label><label style="margin:0">Hasta <input id="rangeEnd" type="date" value="${today()}"></label><button id="loadRangeReport">Generar reporte</button></div>
+  <div class="row hidden" id="rangeExportBtns"><button id="rangeCsv" class="ghost">Exportar CSV</button><button id="rangePdf" class="ghost">Exportar PDF</button></div>
+  <div id="rangeReportOut" class="report-spacer"><p class="muted">Aún no has generado el reporte.</p></div>
+  </section>`;
+  let lastRange=null;
   const loadRange=async()=>{
     const group=document.getElementById('rangeGrp').value;
     const start=document.getElementById('rangeStart').value;
@@ -90,10 +103,13 @@ async function renderReports(){
     if(!group){ alert('Selecciona un grupo para generar el reporte.'); return; }
     if(!start || !end){ alert('Selecciona fecha inicial y fecha final.'); return; }
     if(start>end){ alert('La fecha inicial no puede ser mayor que la fecha final.'); return; }
+    const out=document.getElementById('rangeReportOut');
+    out.innerHTML='<p class="muted">Generando reporte...</p>';
     const dates=getDateRange(start,end);
     const students=await getStudents([group]);
-    const snap=await db.collection('attendance').where('group','==',group).where('date','>=',start).where('date','<=',end).get();
-    const records=snap.docs.map(d=>({id:d.id,...d.data()}));
+    // Consulta amplia para evitar errores de índice compuesto en Firestore.
+    const snap=await db.collection('attendance').get();
+    const records=snap.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.group===group && r.date>=start && r.date<=end);
     const attended=new Set(records.map(r=>`${r.studentId||r.matricula||r.studentName}_${r.date}`));
     const rows=students.map(st=>{
       const cells={};
@@ -101,10 +117,13 @@ async function renderReports(){
       return {id:st.id, matricula:st.matricula, nombre:st.nombre, grupo:st.grupo, cells};
     }).sort((a,b)=>a.nombre.localeCompare(b.nombre));
     lastRange={group,start,end,dates,rows};
-    document.getElementById('rangeReportOut').innerHTML=`<div class="tableWrap"><table><thead><tr><th>Grupo</th><th>Nombre</th>${dates.map(d=>`<th>${safe(formatDateShort(d))}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr><td>${safe(r.grupo)}</td><td>${safe(r.nombre)}</td>${dates.map(d=>`<td class="${r.cells[d]==='A'?'okCell':'naCell'}"><strong>${r.cells[d]}</strong></td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    document.getElementById('rangeExportBtns').classList.remove('hidden');
+    out.innerHTML=`<p class="success">Reporte generado: ${safe(group)} · ${safe(start)} a ${safe(end)} · ${rows.length} estudiantes.</p><div class="tableWrap"><table><thead><tr><th>Grupo</th><th>Nombre</th>${dates.map(d=>`<th>${safe(formatDateShort(d))}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr><td>${safe(r.grupo)}</td><td>${safe(r.nombre)}</td>${dates.map(d=>`<td class="${r.cells[d]==='A'?'okCell':'naCell'}"><strong>${r.cells[d]}</strong></td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   };
-  document.getElementById('loadReport').onclick=load; document.getElementById('csv').onclick=()=>downloadCSV(last); document.getElementById('pdf').onclick=()=>exportPDF(last);
-  document.getElementById('loadRangeReport').onclick=loadRange; document.getElementById('rangeCsv').onclick=()=>{ if(!lastRange){ alert('Primero genera el reporte.'); return; } downloadRangeCSV(lastRange); }; document.getElementById('rangePdf').onclick=()=>{ if(!lastRange){ alert('Primero genera el reporte.'); return; } exportRangePDF(lastRange); };
+  document.getElementById('backReports').onclick=()=>renderHome('reports');
+  document.getElementById('loadRangeReport').onclick=loadRange;
+  document.getElementById('rangeCsv').onclick=()=>{ if(!lastRange){ alert('Primero genera el reporte.'); return; } downloadRangeCSV(lastRange); };
+  document.getElementById('rangePdf').onclick=()=>{ if(!lastRange){ alert('Primero genera el reporte.'); return; } exportRangePDF(lastRange); };
 }
 function getDateRange(start,end){ const out=[]; const d=new Date(start+'T00:00:00'); const e=new Date(end+'T00:00:00'); while(d<=e){ out.push(d.toISOString().slice(0,10)); d.setDate(d.getDate()+1); } return out; }
 function formatDateShort(dateStr){ const [y,m,d]=dateStr.split('-'); return `${d}/${m}`; }
