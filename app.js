@@ -161,9 +161,52 @@ async function renderStudentSession(sessionId){
   if(!doc.exists){ appEl.innerHTML='<section class="card error"><h1>Sesión no encontrada</h1></section>'; return; }
   const s={id:doc.id,...doc.data()};
   if(!s.open){ appEl.innerHTML='<section class="card error"><h1>Sesión cerrada</h1><p>Esta asistencia ya no acepta registros.</p></section>'; return; }
+
+  const lockKey='attendance_lock_'+s.id;
+  const previous=localStorage.getItem(lockKey);
+  if(previous){
+    try{
+      const r=JSON.parse(previous);
+      appEl.innerHTML=`<section class="card successBox"><h1>Asistencia ya registrada</h1><p>Este dispositivo ya registró una asistencia para esta sesión.</p><p><strong>${safe(r.name||'Alumno')}</strong></p><p>Hora registrada: <strong>${safe(r.time||'')}</strong></p><p class="muted">Puedes cerrar esta pestaña. Para evitar registros duplicados, el formulario quedó bloqueado.</p></section>`;
+    }catch(e){
+      appEl.innerHTML='<section class="card successBox"><h1>Asistencia ya registrada</h1><p>Este dispositivo ya fue usado para esta sesión. Puedes cerrar esta pestaña.</p></section>';
+    }
+    return;
+  }
+
   const students=await getStudents([s.grupo]);
   appEl.innerHTML=`<section class="card"><h1>Registrar asistencia</h1><p><strong>${safe(s.subject)}</strong> · Grupo ${safe(s.grupo)}</p><p class="muted">Inicio de clase: ${safe(s.classStartTime||'')}</p><p class="muted">Selecciona tu nombre o escribe tu matrícula.</p><label>Alumno</label><select id="studentSel"><option value="">Selecciona...</option>${students.map(st=>`<option value="${safe(st.id)}">${safe(st.nombre)} · ${safe(st.matricula)}</option>`).join('')}</select><label>Matrícula</label><input id="mat" placeholder="También puedes escribir tu matrícula"><button id="register">Registrar asistencia</button><div id="msg"></div></section>`;
-  document.getElementById('register').onclick=async()=>{ let st=null; const id=document.getElementById('studentSel').value; const mat=document.getElementById('mat').value.trim(); if(id) st=students.find(x=>x.id===id); else st=students.find(x=>String(x.matricula)===mat); if(!st){ document.getElementById('msg').innerHTML='<p class="error">No se encontró el alumno en este grupo.</p>'; return;} const recId=s.id+'_'+st.id; const recRef=db.collection('attendance').doc(recId); const existing=await recRef.get(); if(existing.exists){ const r=existing.data(); document.getElementById('msg').innerHTML=`<p class="error">Ya existe un registro para ${safe(st.nombre)} en esta sesión. Hora registrada: ${safe(r.time||'')}</p>`; return; } const status=statusBySession(s); const arrival=nowTime(); await recRef.set({sessionId:s.id,studentId:st.id,studentName:st.nombre,matricula:st.matricula,group:st.grupo,date:s.date,time:arrival,status,subject:s.subject,teacherUid:s.teacherUid,teacherName:s.teacherName,createdAt:firebase.firestore.FieldValue.serverTimestamp()}); document.getElementById('msg').innerHTML=`<p class="success">Registro realizado: ${safe(status)} · ${arrival}</p>`; };
+  document.getElementById('register').onclick=async()=>{
+    let st=null;
+    const id=document.getElementById('studentSel').value;
+    const mat=document.getElementById('mat').value.trim();
+    const btn=document.getElementById('register');
+    const msg=document.getElementById('msg');
+    if(id) st=students.find(x=>x.id===id); else st=students.find(x=>String(x.matricula)===mat);
+    if(!st){ msg.innerHTML='<p class="error">No se encontró el alumno en este grupo.</p>'; return;}
+    btn.disabled=true;
+    btn.textContent='Registrando...';
+    const recId=s.id+'_'+st.id;
+    const recRef=db.collection('attendance').doc(recId);
+    try{
+      const existing=await recRef.get();
+      if(existing.exists){
+        const r=existing.data();
+        localStorage.setItem(lockKey, JSON.stringify({studentId:st.id,name:st.nombre,time:r.time||'',status:r.status||'Registrado'}));
+        appEl.innerHTML=`<section class="card successBox"><h1>Asistencia ya registrada</h1><p>Ya existe un registro para:</p><p><strong>${safe(st.nombre)}</strong></p><p>Hora registrada: <strong>${safe(r.time||'')}</strong></p><p class="muted">El formulario quedó bloqueado en este dispositivo.</p></section>`;
+        return;
+      }
+      const status=statusBySession(s);
+      const arrival=nowTime();
+      await recRef.set({sessionId:s.id,studentId:st.id,studentName:st.nombre,matricula:st.matricula,group:st.grupo,date:s.date,time:arrival,status,subject:s.subject,teacherUid:s.teacherUid,teacherName:s.teacherName,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+      localStorage.setItem(lockKey, JSON.stringify({studentId:st.id,name:st.nombre,time:arrival,status}));
+      appEl.innerHTML=`<section class="card successBox"><h1>Asistencia registrada</h1><p><strong>${safe(st.nombre)}</strong></p><p>Estado: <strong>${safe(status)}</strong></p><p>Hora de llegada: <strong>${safe(arrival)}</strong></p><p class="muted">Puedes cerrar esta pestaña. Para evitar que se registre a otra persona, el formulario quedó bloqueado.</p></section>`;
+    }catch(e){
+      btn.disabled=false;
+      btn.textContent='Registrar asistencia';
+      msg.innerHTML=`<p class="error">No se pudo registrar: ${safe(e.message)}</p>`;
+    }
+  };
 }
 function statusBySession(s){ const start=new Date(s.startISO); const mins=(Date.now()-start.getTime())/60000; if(mins <= Number(s.attendanceWindowMinutes||10)) return 'Asistencia'; if(mins <= Number(s.lateWindowMinutes||20)) return 'Retardo'; return 'Falta'; }
 
