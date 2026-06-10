@@ -77,12 +77,55 @@ async function renderReports(){
   <h3>Reporte por día</h3>
   <div class="row"><select id="rgrp"><option value="">Todos</option>${groups.map(g=>`<option>${safe(g.name)}</option>`).join('')}</select><input id="rdate" type="date" value="${today()}"><button id="loadReport">Consultar</button><button id="csv" class="ghost">Exportar CSV</button><button id="pdf" class="ghost">Exportar PDF</button></div><div id="reportOut"></div>
   <hr style="border:none;border-top:1px solid #e3e8ef;margin:24px 0">
+  <h3>Registro manual de asistencia</h3>
+  <p class="muted">Úsalo cuando un alumno no pueda leer el QR. Se valida que no exista otro registro del mismo alumno en la fecha y grupo seleccionados.</p>
+  <div class="grid"><div>
+    <label>Grupo</label><select id="mgrp"><option value="">Selecciona grupo...</option>${groups.map(g=>`<option>${safe(g.name)}</option>`).join('')}</select>
+    <label>Alumno</label><select id="mstudent"><option value="">Primero selecciona grupo...</option></select>
+  </div><div>
+    <label>Fecha</label><input id="mdate" type="date" value="${today()}">
+    <label>Hora de llegada</label><input id="mtime" type="time" value="${new Date().toTimeString().slice(0,5)}">
+    <label>Hora de inicio de clase</label><input id="mstart" type="time" value="${new Date().toTimeString().slice(0,5)}">
+    <button id="manualAdd">Agregar asistencia manual</button>
+  </div></div><div id="manualMsg"></div>
+  <hr style="border:none;border-top:1px solid #e3e8ef;margin:24px 0">
   <h3>Reporte acumulado por varios días</h3>
   <p class="muted">Para no saturar esta pantalla, el reporte acumulado se genera en una página separada.</p>
   <button id="openRangeReports">Abrir reporte acumulado</button>
   </section>`;
   let last=[];
   const load=async()=>{ const g=document.getElementById('rgrp').value; const d=document.getElementById('rdate').value; let q=db.collection('attendance').where('date','==',d); const snap=await q.get(); last=snap.docs.map(x=>({docId:x.id,...x.data()})).filter(r=>!g||r.group===g).sort((a,b)=>(a.group||'').localeCompare(b.group||'')||(a.studentName||'').localeCompare(b.studentName||'')); document.getElementById('reportOut').innerHTML=`<table><thead><tr><th>Fecha</th><th>Grupo</th><th>Nombre</th><th>Hora de llegada</th><th>Acción</th></tr></thead><tbody>${last.map(r=>`<tr><td>${safe(r.date)}</td><td>${safe(r.group)}</td><td>${safe(r.studentName)}</td><td>${safe(r.time)}</td><td><button class="danger small delRec" data-id="${safe(r.docId)}">Borrar</button></td></tr>`).join('')}</tbody></table>`; document.querySelectorAll('.delRec').forEach(btn=>btn.onclick=async()=>{ if(confirm('¿Borrar este registro de asistencia?')){ await db.collection('attendance').doc(btn.dataset.id).delete(); await load(); } }); };
+  const refreshManualStudents=async()=>{
+    const g=document.getElementById('mgrp').value;
+    const sel=document.getElementById('mstudent');
+    if(!g){ sel.innerHTML='<option value="">Primero selecciona grupo...</option>'; return; }
+    const students=await getStudents([g]);
+    sel.innerHTML='<option value="">Selecciona alumno...</option>'+students.map(st=>`<option value="${safe(st.id)}">${safe(st.nombre)} · ${safe(st.matricula||'')}</option>`).join('');
+  };
+  const addManual=async()=>{
+    const group=document.getElementById('mgrp').value;
+    const studentId=document.getElementById('mstudent').value;
+    const date=document.getElementById('mdate').value;
+    const time=document.getElementById('mtime').value;
+    const start=document.getElementById('mstart').value;
+    const msg=document.getElementById('manualMsg');
+    if(!group || !studentId || !date || !time){ msg.innerHTML='<p class="error">Selecciona grupo, alumno, fecha y hora.</p>'; return; }
+    const students=await getStudents([group]);
+    const st=students.find(x=>x.id===studentId);
+    if(!st){ msg.innerHTML='<p class="error">No se encontró el alumno seleccionado.</p>'; return; }
+    const existing=await db.collection('attendance').where('date','==',date).where('group','==',group).where('studentId','==',st.id).limit(1).get();
+    if(!existing.empty){ msg.innerHTML='<p class="error">Este alumno ya tiene asistencia registrada en esa fecha y grupo.</p>'; return; }
+    const sessions=await db.collection('sessions').where('date','==',date).where('grupo','==',group).limit(1).get();
+    const sessionData=sessions.empty ? null : {id:sessions.docs[0].id, ...sessions.docs[0].data()};
+    const status=statusByManualTime(date,time,start || sessionData?.classStartTime || time, sessionData);
+    const recId='manual_'+date.replaceAll('-','')+'_'+group.replace(/\W/g,'')+'_'+st.id;
+    await db.collection('attendance').doc(recId).set({sessionId:sessionData?.id||'manual',manual:true,studentId:st.id,studentName:st.nombre,matricula:st.matricula,group:st.grupo,date,time,status,subject:sessionData?.subject||'Registro manual',teacherUid:currentUser.uid,teacherName:currentProfile.name,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+    msg.innerHTML=`<p class="success">Asistencia manual agregada para <strong>${safe(st.nombre)}</strong>.</p>`;
+    document.getElementById('rgrp').value=group; document.getElementById('rdate').value=date;
+    await load();
+  };
+  document.getElementById('mgrp').onchange=refreshManualStudents;
+  document.getElementById('manualAdd').onclick=addManual;
   document.getElementById('loadReport').onclick=load; document.getElementById('csv').onclick=()=>downloadCSV(last); document.getElementById('pdf').onclick=()=>exportPDF(last);
   document.getElementById('openRangeReports').onclick=()=>renderHome('rangeReports');
 }
@@ -209,6 +252,16 @@ async function renderStudentSession(sessionId){
   };
 }
 function statusBySession(s){ const start=new Date(s.startISO); const mins=(Date.now()-start.getTime())/60000; if(mins <= Number(s.attendanceWindowMinutes||10)) return 'Asistencia'; if(mins <= Number(s.lateWindowMinutes||20)) return 'Retardo'; return 'Falta'; }
+function statusByManualTime(date, arrivalTime, startTime, sessionData){
+  const arrival=new Date(`${date}T${arrivalTime}:00`);
+  const start=new Date(`${date}T${startTime}:00`);
+  const mins=(arrival.getTime()-start.getTime())/60000;
+  const ok=Number(sessionData?.attendanceWindowMinutes || window.APP_CONFIG.attendanceWindowMinutes || 10);
+  const late=Number(sessionData?.lateWindowMinutes || window.APP_CONFIG.lateWindowMinutes || 20);
+  if(mins <= ok) return 'Asistencia';
+  if(mins <= late) return 'Retardo';
+  return 'Falta';
+}
 
 async function checkPendingProfile(){
   if(!currentUser || currentProfile) return;
