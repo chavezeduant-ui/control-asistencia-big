@@ -1,9 +1,0 @@
-{
-  "name": "Control de Asistencia BIG",
-  "short_name": "Asistencia BIG",
-  "start_url": "./",
-  "display": "standalone",
-  "background_color": "#edf4f8",
-  "theme_color": "#12395a",
-  "icons": []
-}
