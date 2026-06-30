@@ -1,9 +1,9 @@
 {
-  "name": "Control de Asistencia BIG",
-  "short_name": "Asistencia BIG",
+  "name": "SIGE BIG",
+  "short_name": "SIGE BIG",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#0f3d5e",
-  "icons": []
+  "background_color": "#0f172a",
+  "theme_color": "#1d4ed8",
+  "description": "Sistema Integral de Gestión Escolar BIG"
 }
